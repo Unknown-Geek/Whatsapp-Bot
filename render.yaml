@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: whatsapp-bot
+    env: node
+    plan: free
+    buildCommand: 'npm install'
+    startCommand: 'node index.js'
+    envVars:
+      - key: NODE_ENV
+        value: production
+    disk:
+      name: session-data
+      mountPath: /workspaces/Whatsapp-Bot/.session
+      sizeGB: 1
+    autoDeploy: true
+    region: oregon
+    branch: main
+    healthCheckPath: /
+    
+# Adjust 'mountPath' if your session directory is elsewhere.
+# For paid plan, change 'plan' to 'starter' or higher.
