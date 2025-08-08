@@ -27,9 +27,21 @@ const client = new Client({
       '--disable-dev-shm-usage',
       '--disable-gpu',
       '--no-zygote',
-      '--single-process'
+      '--single-process',
+      '--disable-web-security',
+      '--disable-features=VizDisplayCompositor',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-field-trial-config',
+      '--disable-back-forward-cache',
+      '--disable-ipc-flooding-protection'
     ],
   },
+  webVersionCache: {
+    type: 'remote',
+    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+  }
 });
 
 client.on('qr', (qr) => {
@@ -56,8 +68,16 @@ client.on('ready', () => {
 
 client.on('disconnected', (reason) => {
   isReady = false;
+  isAuthenticated = false;
   console.warn('[whatsapp] Disconnected:', reason);
-  // attempt to auto-recover
+  
+  // Only attempt to auto-recover for certain disconnect reasons
+  if (reason === 'NAVIGATION' || reason === 'CONFLICT') {
+    console.log('[whatsapp] Auto-recovery not recommended for reason:', reason);
+    return;
+  }
+  
+  // attempt to auto-recover with backoff
   setTimeout(() => {
     try {
       console.log('[whatsapp] Reinitializing client after disconnect...');
@@ -65,7 +85,7 @@ client.on('disconnected', (reason) => {
     } catch (e) {
       console.error('[whatsapp] Reinitialize failed:', e.message);
     }
-  }, 1500);
+  }, 5000); // Increased delay to 5 seconds
 });
 
 client.on('message', async (msg) => {
@@ -75,7 +95,17 @@ client.on('message', async (msg) => {
   // }
 });
 
-client.initialize();
+// Add error handling for client
+client.on('error', (error) => {
+  console.error('[whatsapp] Client error:', error);
+});
+
+// Initialize with error handling
+try {
+  client.initialize();
+} catch (error) {
+  console.error('[whatsapp] Failed to initialize client:', error);
+}
 
 // Helpers
 function toWhatsAppId(number) {
@@ -122,6 +152,23 @@ app.get('/qr', (req, res) => {
   if (isReady) return res.status(204).end();
   if (!lastQR) return res.status(404).json({ error: 'no_qr_yet' });
   return res.json({ qr: lastQR });
+});
+
+// Manual restart endpoint
+app.post('/restart', (req, res) => {
+  try {
+    isReady = false;
+    isAuthenticated = false;
+    lastQR = null;
+    console.log('[whatsapp] Manual restart requested');
+    client.destroy();
+    setTimeout(() => {
+      client.initialize();
+    }, 2000);
+    res.json({ success: true, message: 'Client restart initiated' });
+  } catch (err) {
+    res.status(500).json({ error: 'restart_failed', message: err.message });
+  }
 });
 
 // Send text message
