@@ -4,7 +4,33 @@ const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 
 const app = express();
-app.use(express.json());
+
+// Add logging middleware to debug requests
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  next();
+});
+
+// Add raw body logging for debugging JSON issues
+app.use('/send', (req, res, next) => {
+  let body = '';
+  req.on('data', chunk => {
+    body += chunk.toString();
+  });
+  req.on('end', () => {
+    console.log('Raw body received:', JSON.stringify(body));
+    req.rawBody = body;
+    next();
+  });
+});
+
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, res, buf, encoding) => {
+    console.log('JSON buffer received:', buf.toString());
+  }
+}));
 
 // Config
 const PORT = process.env.PORT || 10000;
@@ -154,6 +180,18 @@ app.get('/qr', (req, res) => {
   return res.json({ qr: lastQR });
 });
 
+// Test JSON parsing endpoint
+app.post('/test-json', (req, res) => {
+  console.log('Test JSON endpoint called');
+  console.log('Request body:', req.body);
+  console.log('Raw body:', req.rawBody);
+  res.json({ 
+    success: true, 
+    received: req.body,
+    rawBody: req.rawBody 
+  });
+});
+
 // Manual restart endpoint
 app.post('/restart', (req, res) => {
   try {
@@ -173,17 +211,38 @@ app.post('/restart', (req, res) => {
 
 // Send text message
 app.post('/send', async (req, res) => {
+  console.log('Send endpoint called');
+  console.log('Request body:', req.body);
+  console.log('Raw body:', req.rawBody);
+  
   if (requireReady(res)) return; // ensure client is ready
+  
   const { number, message, jid } = req.body || {};
+  
+  console.log('Parsed values:', { number, message, jid });
+  
   if (!message || (!number && !jid)) {
-    return res.status(400).json({ error: 'bad_request', message: "'message' and either 'number' or 'jid' are required" });
+    console.log('Bad request: missing required fields');
+    return res.status(400).json({ 
+      error: 'bad_request', 
+      message: "'message' and either 'number' or 'jid' are required",
+      received: { number, message, jid }
+    });
   }
+  
   try {
     const to = jid || toWhatsAppId(number);
-    if (!to) return res.status(400).json({ error: 'invalid_number' });
+    if (!to) {
+      console.log('Invalid number:', number);
+      return res.status(400).json({ error: 'invalid_number', number });
+    }
+    
+    console.log('Sending message to:', to);
     await client.sendMessage(to, String(message));
+    console.log('Message sent successfully');
     res.json({ success: true, to });
   } catch (err) {
+    console.error('Send failed:', err);
     res.status(500).json({ error: 'send_failed', message: err.message });
   }
 });
