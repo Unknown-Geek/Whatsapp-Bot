@@ -8,28 +8,11 @@ const app = express();
 // Add logging middleware to debug requests
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
   next();
 });
 
-// Add raw body logging for debugging JSON issues
-app.use('/send', (req, res, next) => {
-  let body = '';
-  req.on('data', chunk => {
-    body += chunk.toString();
-  });
-  req.on('end', () => {
-    console.log('Raw body received:', JSON.stringify(body));
-    req.rawBody = body;
-    next();
-  });
-});
-
 app.use(express.json({
-  limit: '10mb',
-  verify: (req, res, buf, encoding) => {
-    console.log('JSON buffer received:', buf.toString());
-  }
+  limit: '10mb'
 }));
 
 // Config
@@ -184,11 +167,9 @@ app.get('/qr', (req, res) => {
 app.post('/test-json', (req, res) => {
   console.log('Test JSON endpoint called');
   console.log('Request body:', req.body);
-  console.log('Raw body:', req.rawBody);
   res.json({ 
     success: true, 
-    received: req.body,
-    rawBody: req.rawBody 
+    received: req.body
   });
 });
 
@@ -213,7 +194,6 @@ app.post('/restart', (req, res) => {
 app.post('/send', async (req, res) => {
   console.log('Send endpoint called');
   console.log('Request body:', req.body);
-  console.log('Raw body:', req.rawBody);
   
   if (requireReady(res)) return; // ensure client is ready
   
