@@ -32,3 +32,9 @@ libegl1
 libgles2
 libgdk-pixbuf-2.0-0
 librsvg2-2
+libxcb-dri3-0
+libappindicator3-1
+libxcb1
+libxtst6
+libu2f-udev
+libvulkan1

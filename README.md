@@ -7,7 +7,7 @@ Minimal WhatsApp bot server using `whatsapp-web.js` with an HTTP API.
 1) Install deps
 
 ```
-npm install
+sudo apt update && sudo xargs -a packages.txt apt install -y && npm install
 ```
 
 2) Start server (defaults to port 10000)
