@@ -28,7 +28,6 @@ fonts-liberation
 xdg-utils
 wget
 ca-certificates
-# Optional (often pulled as deps but listed for clarity)
 libegl1
 libgles2
 libgdk-pixbuf-2.0-0
