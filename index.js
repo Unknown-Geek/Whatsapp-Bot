@@ -1,4 +1,6 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
@@ -23,98 +25,118 @@ const SESSION_PATH = process.env.SESSION_PATH || '.session';
 let isReady = false;
 let isAuthenticated = false;
 let lastQR = null; // string content of last QR
+let client = null;
 
-const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: SESSION_PATH }), // persist sessions to configured path
-  restartOnAuthFail: true,
-  takeoverOnConflict: true,
-  puppeteer: {
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-zygote',
-      '--single-process',
-      '--disable-web-security',
-      '--disable-features=VizDisplayCompositor',
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding',
-      '--disable-field-trial-config',
-      '--disable-back-forward-cache',
-      '--disable-ipc-flooding-protection'
-    ],
-  },
-  webVersionCache: {
-    type: 'remote',
-    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
-  }
-});
-
-client.on('qr', (qr) => {
-  lastQR = qr;
-  console.log('[whatsapp] New QR received. Scan it to log in.');
-  // Also print an ASCII QR in the terminal for convenience
-  qrcodeTerminal.generate(qr, { small: true });
-});
-
-client.on('authenticated', () => {
-  isAuthenticated = true;
-  console.log('[whatsapp] Authenticated');
-});
-
-client.on('auth_failure', (msg) => {
-  isAuthenticated = false;
-  console.error('[whatsapp] Authentication failure:', msg);
-});
-
-client.on('ready', () => {
-  isReady = true;
-  console.log('[whatsapp] WhatsApp Web client is ready');
-});
-
-client.on('disconnected', (reason) => {
-  isReady = false;
-  isAuthenticated = false;
-  console.warn('[whatsapp] Disconnected:', reason);
-  
-  // Only attempt to auto-recover for certain disconnect reasons
-  if (reason === 'NAVIGATION' || reason === 'CONFLICT') {
-    console.log('[whatsapp] Auto-recovery not recommended for reason:', reason);
-    return;
-  }
-  
-  // attempt to auto-recover with backoff
-  setTimeout(() => {
-    try {
-      console.log('[whatsapp] Reinitializing client after disconnect...');
-      client.initialize();
-    } catch (e) {
-      console.error('[whatsapp] Reinitialize failed:', e.message);
-    }
-  }, 5000); // Increased delay to 5 seconds
-});
-
-client.on('message', async (msg) => {
-  // Simple auto-reply example (disabled by default). Uncomment to enable.
-  // if (msg.body?.toLowerCase() === 'ping') {
-  //   await client.sendMessage(msg.from, 'pong');
-  // }
-});
-
-// Add error handling for client
-client.on('error', (error) => {
-  console.error('[whatsapp] Client error:', error);
-});
-
-// Initialize with error handling
-try {
-  client.initialize();
-} catch (error) {
-  console.error('[whatsapp] Failed to initialize client:', error);
+function buildClient() {
+  return new Client({
+    authStrategy: new LocalAuth({ dataPath: SESSION_PATH }), // persist sessions to configured path
+    restartOnAuthFail: true,
+    takeoverOnConflict: true,
+    puppeteer: {
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-zygote',
+        '--window-size=1280,800'
+      ],
+    },
+    // Let library auto-manage web version; removing pinned remote HTML which can break when outdated
+  });
 }
+
+function initializeClient() {
+  if (client) {
+    try { client.removeAllListeners(); } catch (_) {}
+  }
+  client = buildClient();
+  wireClientEvents(client);
+  try {
+    client.initialize();
+  } catch (err) {
+    console.error('[whatsapp] Failed to initialize client:', err);
+  }
+}
+
+function clearSessionData() {
+  try {
+    const authPath = path.resolve(SESSION_PATH, 'whatsapp-web.js');
+    if (fs.existsSync(authPath)) {
+      fs.rmSync(authPath, { recursive: true, force: true });
+      console.log('[whatsapp] Cleared session data at', authPath);
+    }
+  } catch (e) {
+    console.warn('[whatsapp] Failed to clear session data:', e.message);
+  }
+}
+
+function wireClientEvents(c) {
+  c.on('qr', (qr) => {
+    lastQR = qr;
+    console.log('[whatsapp] New QR received. Scan it to log in.');
+    qrcodeTerminal.generate(qr, { small: true });
+  });
+
+  c.on('authenticated', () => {
+    isAuthenticated = true;
+    console.log('[whatsapp] Authenticated');
+  });
+
+  c.on('auth_failure', (msg) => {
+    isAuthenticated = false;
+    console.error('[whatsapp] Authentication failure:', msg);
+  });
+
+  c.on('ready', () => {
+    isReady = true;
+    console.log('[whatsapp] WhatsApp Web client is ready');
+  });
+
+  c.on('disconnected', async (reason) => {
+    isReady = false;
+    isAuthenticated = false;
+    console.warn('[whatsapp] Disconnected:', reason);
+
+    if (reason === 'LOGOUT') {
+      // Session invalidated; must clear and rebuild new client requiring fresh QR
+      console.log('[whatsapp] Handling LOGOUT: clearing session and creating new client');
+      clearSessionData();
+      try { await c.destroy(); } catch (_) {}
+      lastQR = null;
+      setTimeout(() => initializeClient(), 3000);
+      return;
+    }
+
+    // Only attempt to auto-recover for certain disconnect reasons
+    if (reason === 'NAVIGATION' || reason === 'CONFLICT') {
+      console.log('[whatsapp] Auto-recovery not recommended for reason:', reason);
+      return;
+    }
+
+    setTimeout(() => {
+      try {
+        console.log('[whatsapp] Reinitializing existing client after disconnect...');
+        c.initialize();
+      } catch (e) {
+        console.error('[whatsapp] Reinitialize failed, rebuilding client:', e.message);
+        initializeClient();
+      }
+    }, 5000);
+  });
+
+  c.on('message', async (msg) => {
+    // placeholder for auto-reply logic
+  });
+
+  c.on('error', (error) => {
+    console.error('[whatsapp] Client error:', error);
+  });
+}
+
+// Initialize first client
+initializeClient();
 
 // Helpers
 function toWhatsAppId(number) {
