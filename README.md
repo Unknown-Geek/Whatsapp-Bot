@@ -6,9 +6,23 @@ Minimal WhatsApp bot server using `whatsapp-web.js` with an HTTP API.
 
 1) Install deps
 
+Local (Ubuntu/Debian):
+
 ```
-sudo apt update && sudo xargs -a packages.txt apt install -y && npm install
+sudo apt update && sudo xargs -a packages.txt apt install -y
+npm install
 ```
+
+Render / generic managed Node host (no root apt):
+
+Set in the service settings:
+
+```
+Build Command: npm install
+Start Command: npm start
+```
+
+If the host is missing required Chromium system libraries (you see errors about missing .so files), deploy with the provided Dockerfile instead.
 
 2) Start server (defaults to port 10000)
 
